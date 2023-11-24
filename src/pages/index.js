@@ -16,11 +16,11 @@ const Home = () => {
   useEffect(() => {
     // Play the video on mount
     const video = videoRef.current;
-    video.play();
+    video?.play();
 
     // Cleanup on unmount
     return () => {
-      video.pause();
+      video?.pause();
     };
   }, []);
 
@@ -36,12 +36,7 @@ const Home = () => {
   return (
     <div>
       <div className={styles.container}>
-        <video
-          className={styles['background-video']}
-          ref={videoRef}
-          loop
-          muted
-        >
+      <video className={styles['background-video']} playsInline loop autoPlay muted autobuffer>
           <source src="/landingvid.mp4" type="video/mp4" />
           Your browser does not support the video tag.
         </video>
