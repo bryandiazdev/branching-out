@@ -1,0 +1,53 @@
+
+name: 'Universal CodeQL Analysis'
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 1'  # Run weekly on Mondays at 02:00 AM UTC
+  push:
+    branches: [ 'main' ]
+  pull_request:
+    branches: [ 'main' ]
+
+permissions:
+  contents: read
+  security-events: write  # Required for Code Scanning API
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']  # Add more languages if needed
+        unique_id: [uuid()]  # Generate a unique identifier
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        output: ${{ github.workspace }}/codeql-results-${{ matrix.language }}-${{ matrix.unique_id }}.sarif
+        category: ${{ matrix.language }}-analysis-${{ matrix.unique_id }}  # Ensure unique category
+
+    - name: Upload SARIF to GitHub
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ github.workspace }}/codeql-results-${{ matrix.language }}-${{ matrix.unique_id }}.sarif
+        category: ${{ matrix.language }}-sarif-${{ matrix.unique_id }}  # Ensure unique category
+
+    - name: Upload results as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: codeql-results-${{ matrix.language }}-${{ matrix.unique_id }}
+        path: ${{ github.workspace }}/codeql-results-${{ matrix.language }}-${{ matrix.unique_id }}.sarif
+
