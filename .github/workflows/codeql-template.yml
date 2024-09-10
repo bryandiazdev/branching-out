@@ -1,0 +1,107 @@
+
+name: 'Universal CodeQL Analysis'
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 1'  # Run weekly on Mondays at 02:00 AM UTC
+  push:
+    branches: [ 'main' ]
+  pull_request:
+    branches: [ 'main' ]
+
+permissions:
+  contents: read
+  security-events: write  # Required for Code Scanning API
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript
+
+    - name: Create custom CodeQL queries
+      run: |
+        mkdir -p .github/codeql-queries/queries
+
+        # Query 1: Analyze function lengths
+        echo "
+        import javascript
+        from Function f, int numLines
+        where numLines = f.getEndLine() - f.getStartLine()
+        select f, 'Function ' + f.getName() + ' has ' + numLines.toString() + ' lines of code.'
+        " > .github/codeql-queries/queries/function-lengths.ql
+
+        # Query 2: Detect unused variables
+        echo "
+        import javascript
+        from Variable v
+        where v.getAReference() = null
+        select v, 'Variable ' + v.getName() + ' is declared but never used.'
+        " > .github/codeql-queries/queries/unused-variables.ql
+
+        # Query 3: Detect large files
+        echo "
+        import javascript
+        from SourceFile f
+        where f.getEndLine() > 500
+        select f, 'Source file ' + f.getBaseName() + ' has more than 500 lines.'
+        " > .github/codeql-queries/queries/large-files.ql
+
+        # Query 4: Security - Detect eval usage (potential XSS risk)
+        echo "
+        import javascript
+        from CallExpr call
+        where call.getCallee().matches('eval')
+        select call, 'Use of eval at ' + call.getLocation().toString() + ' is a potential security risk.'
+        " > .github/codeql-queries/queries/detect-eval.ql
+
+        # Query 5: Identify unused functions
+        echo "
+        import javascript
+        from Function f
+        where not exists(f.getAReference())
+        select f, 'Function ' + f.getName() + ' is defined but never called.'
+        " > .github/codeql-queries/queries/unused-functions.ql
+
+        # Query 6: Detect functions with complex nesting (complexity > 3)
+        echo "
+        import javascript
+        from Function f, int complexity
+        where complexity = f.getComplexity() and complexity > 3
+        select f, 'Function ' + f.getName() + ' has high complexity: ' + complexity.toString() + '.'
+        " > .github/codeql-queries/queries/function-complexity.ql
+
+        # Query 7: Identify insecure HTTP calls (http instead of https)
+        echo "
+        import javascript
+        from CallExpr call
+        where call.getCallee().matches('http.get') or call.getCallee().matches('http.request')
+        select call, 'HTTP call found: ' + call.getLocation().toString() + '. Consider using HTTPS instead.'
+        " > .github/codeql-queries/queries/insecure-http-calls.ql
+
+    - name: Perform CodeQL Analysis with Custom Queries
+      uses: github/codeql-action/analyze@v3
+      with:
+        output: ${{ github.workspace }}/codeql-results-${{ matrix.language }}.sarif
+        queries: ./.github/codeql-queries/queries
+
+    - name: Upload results as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: codeql-results-${{ matrix.language }}
+        path: ${{ github.workspace }}/codeql-results-${{ matrix.language }}.sarif
+
+
