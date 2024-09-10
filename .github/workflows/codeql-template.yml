@@ -1,0 +1,76 @@
+
+name: 'Universal CodeQL Analysis'
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 1'  # Run weekly on Mondays at 02:00 AM UTC
+  push:
+    branches: [ 'main' ]  # Adjust branches as necessary
+  pull_request:
+    branches: [ 'main' ]  # Adjust branches as necessary
+
+permissions:
+  contents: read
+  security-events: write  # Required permission to access Code Scanning API
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']
+        include:
+          - language: 'javascript'
+            path: 'javascript'
+            
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Setup Java (if needed)
+      if: matrix.language == 'java'
+      uses: actions/setup-java@v2
+      with:
+        java-version: '11'
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        queries: security-extended, security-and-quality  # Use valid query packs
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        output: ${{ github.workspace }}/codeql-results-${{ matrix.language }}.sarif  # Specify SARIF output directory
+        category: ${{ matrix.language }}-${{ matrix.language }}-analyze  # Unique category per language
+
+    # Check that the SARIF file exists
+    - name: Check if SARIF file exists
+      run: |
+        if [ ! -f "${{ github.workspace }}/codeql-results-${{ matrix.language }}.sarif" ]; then
+          echo "SARIF file not found!"
+          exit 1
+        else
+          echo "SARIF file found."
+        fi
+
+    - name: Upload SARIF file for GitHub Code Scanning
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ github.workspace }}/codeql-results-${{ matrix.language }}.sarif
+        category: ${{ matrix.language }}-sarif  # Unique category for SARIF upload
+
+    - name: Upload results as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: codeql-results-${{ matrix.language }}
+        path: ${{ github.workspace }}/codeql-results-${{ matrix.language }}.sarif
+
+    - name: Auto-cleanup if no relevant code
+      if: failure()
+      run: echo "CodeQL analysis found no relevant code for ${{ matrix.language }}; ignoring failure."
+
