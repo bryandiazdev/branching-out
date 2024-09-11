@@ -1,0 +1,132 @@
+
+name: 'Universal CodeQL Analysis'
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 1'  # Run weekly on Mondays at 02:00 AM UTC
+  push:
+    branches: [ 'main' ]
+  pull_request:
+    branches: [ 'main' ]
+
+permissions:
+  contents: read
+  security-events: write  # Required for Code Scanning API
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript
+
+    - name: Create custom CodeQL queries
+      run: |
+        mkdir -p .github/codeql-queries/queries
+
+        # Query 1: Analyze function lengths (with a lower threshold for shorter functions)
+        echo "
+        import javascript
+        from Function f, int numLines
+        where numLines = f.getEndLine() - f.getStartLine() and numLines > 10  # Catch shorter functions as well
+        select f, 'Function ' + f.getName() + ' has ' + numLines.toString() + ' lines of code.'
+        " > .github/codeql-queries/queries/function-lengths.ql
+
+        # Query 2: Detect unused variables (expanded to include variables initialized but unused)
+        echo "
+        import javascript
+        from Variable v
+        where v.getAReference() = null and v.isInitialized()
+        select v, 'Variable ' + v.getName() + ' is declared and initialized but never used.'
+        " > .github/codeql-queries/queries/unused-variables.ql
+
+        # Query 3: Detect large files (lowering threshold to 300 lines)
+        echo "
+        import javascript
+        from SourceFile f
+        where f.getEndLine() > 300
+        select f, 'Source file ' + f.getBaseName() + ' has more than 300 lines.'
+        " > .github/codeql-queries/queries/large-files.ql
+
+        # Query 4: Security - Detect eval usage (added additional risky functions)
+        echo "
+        import javascript
+        from CallExpr call
+        where call.getCallee().matches('eval') or call.getCallee().matches('setTimeout') or call.getCallee().matches('setInterval')
+        select call, 'Use of eval, setTimeout, or setInterval at ' + call.getLocation().toString() + ' is a potential security risk.'
+        " > .github/codeql-queries/queries/detect-eval.ql
+
+        # Query 5: Identify unused functions
+        echo "
+        import javascript
+        from Function f
+        where not exists(f.getAReference())
+        select f, 'Function ' + f.getName() + ' is defined but never called.'
+        " > .github/codeql-queries/queries/unused-functions.ql
+
+        # Query 6: Detect functions with complex nesting (lowering complexity threshold)
+        echo "
+        import javascript
+        from Function f, int complexity
+        where complexity = f.getComplexity() and complexity > 2  # Lower threshold for moderate complexity
+        select f, 'Function ' + f.getName() + ' has moderate complexity: ' + complexity.toString() + '.'
+        " > .github/codeql-queries/queries/function-complexity.ql
+
+        # Query 7: Identify insecure HTTP calls (broaden search for all HTTP verbs)
+        echo "
+        import javascript
+        from CallExpr call
+        where call.getCallee().matches('http.get') or call.getCallee().matches('http.request') or call.getCallee().matches('http.post')
+        select call, 'HTTP call found: ' + call.getLocation().toString() + '. Consider using HTTPS instead.'
+        " > .github/codeql-queries/queries/insecure-http-calls.ql
+
+        # Query 8: Detect potential SQL injection
+        echo "
+        import javascript
+        from CallExpr call
+        where call.getCallee().matches('query') and
+              call.getArgument(0).getValue().matches('%SELECT%') and
+              not call.getArgument(0).getValue().matches('%parameterized%')
+        select call, 'Potential SQL injection detected in: ' + call.getLocation().toString()
+        " > .github/codeql-queries/queries/sql-injection.ql
+
+        # Query 9: Detect command injection risks
+        echo "
+        import javascript
+        from CallExpr call
+        where call.getCallee().matches('exec') or call.getCallee().matches('spawn')
+        select call, 'Potential command injection risk detected in: ' + call.getLocation().toString()
+        " > .github/codeql-queries/queries/command-injection.ql
+
+        # Query 10: Detect use of outdated libraries (e.g., Express)
+        echo "
+        import javascript
+        from Dependency dep
+        where dep.getName() = 'express' and dep.getVersion().matches('<4.0.0')
+        select dep, 'Outdated Express version detected: ' + dep.getVersion()
+        " > .github/codeql-queries/queries/outdated-libraries.ql
+
+    - name: Perform CodeQL Analysis with Custom Queries
+      uses: github/codeql-action/analyze@v3
+      with:
+        output: ${{ github.workspace }}/codeql-results-${{ matrix.language }}.sarif
+        queries: ./.github/codeql-queries/queries
+
+    - name: Upload results as artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: codeql-results-${{ matrix.language }}
+        path: ${{ github.workspace }}/codeql-results-${{ matrix.language }}.sarif
+    
